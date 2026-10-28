@@ -3,7 +3,7 @@
 //  Made by DNUZI  |  https://github.com/dnuzi/wa-voip-bot
 // ============================================================
 
-import * as B from '@dnuzi/baileys';
+import * as B from '@dnuzi/baileys'; 
 import Voip from '@dnuzi/baileys/voip';
 import pino from 'pino';
 import fs from 'fs';
