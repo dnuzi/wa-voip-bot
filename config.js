@@ -15,14 +15,14 @@ export default {
     // ---------- Account ----------
     // Bot WhatsApp number (country code, no "+", no spaces).
     // Used for pairing AND is the main owner.
-    number: process.env.BOT_NUMBER || '94757734999',
+    number: process.env.BOT_NUMBER || '94743733073',
 
     // Extra owners (optional) - numbers with country code, no "+"
     owners: [],
 
     // ---------- Login ----------
     // 'pair' = pairing code  |  'qr' = scan QR
-    connectMode: (process.env.CONNECT_MODE || 'pair').toLowerCase(),
+    connectMode: (process.env.CONNECT_MODE || 'qr').toLowerCase(),
 
     // Web server (health check + QR / pairing code page at /qr)
     port: process.env.PORT || 8000,
@@ -33,13 +33,13 @@ export default {
     // ---------- Database ----------
     // Set MONGODB_URI as an environment variable (recommended),
     // or paste your connection string below.
-    mongodbUri: process.env.MONGODB_URI || '',
+    mongodbUri: process.env.MONGODB_URI || 'mongodb+srv://pkt:kimba.mongodb.net/',
     sessionId: process.env.SESSION_ID || 'main',
 
     // ---------- Media played on calls ----------
     // Direct links (audio: .opus/.mp3/.ogg - video: .mp4)
-    audioUrl: 'https://github.com/Lakshanteach/voicee/raw/refs/heads/main/shadow-movie-x-siri-voice.opus',
-    videoUrl: 'https://github.com/Lakshanteach/voicee/raw/refs/heads/main/lv_0_20261015174042.mp4',
+    audioUrl: 'https://file.dnuz.top/suv5il.ogg',
+    videoUrl: 'https://github.com/ubala-siya/file-storage-repo-2/raw/refs/heads/main/uploads/1793198989389-anonymous-7fryx6_IUNFvliL.mp4',
 
     // ---------- Texts ----------
     texts: {
