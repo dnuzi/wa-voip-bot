@@ -1,5 +1,5 @@
 {
-  "name": "wa-voip-bot",
+  "name": "wa-voip-bot", 
   "version": "0.0.1",
   "description": "WhatsApp auto call bot - answers audio/video calls and plays your own voice or video automatically. QR + Pairing code login.",
   "type": "module",
