@@ -65,6 +65,13 @@ try {
     FFMPEG = m.default || FFMPEG;
 } catch {}
 
+// make bundled ffmpeg/ffprobe visible to the voip library (it searches PATH)
+for (const bin of [FFMPEG, FFPROBE]) {
+    if (bin && bin.includes(path.sep)) {
+        process.env.PATH = path.dirname(path.resolve(bin)) + path.delimiter + process.env.PATH;
+    }
+}
+
 // ================= MESSAGE STYLES =================
 const statusIcon = () => (CALL_ON ? '🟢 *ON*' : '🔴 *OFF*');
 
@@ -128,15 +135,46 @@ const endedCalls = new Set();
 const waiters = new Map();
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+
+async function downloadFile(url, file) {
+    // also try the direct raw.githubusercontent.com link (skips one redirect)
+    const direct = url.startsWith('https://github.com/')
+        ? url.replace('https://github.com/', 'https://raw.githubusercontent.com/').replace('/raw/refs/heads/', '/refs/heads/')
+        : url;
+
+    let lastErr;
+    for (const u of new Set([url, direct])) {
+        for (let i = 1; i <= 3; i++) {
+            try {
+                const res = await fetch(u, { redirect: 'follow', headers: { 'User-Agent': UA, Accept: '*/*' } });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
+                return;
+            } catch (e) {
+                lastErr = e;
+                console.log(`⚠️ download try ${i} failed (${u.slice(0, 60)}...): ${e.message}`);
+                await sleep(1500 * i);
+            }
+        }
+    }
+    throw new Error('download failed: ' + lastErr.message);
+}
+
 async function getPcm(url) {
     if (pcmCache.has(url)) return pcmCache.get(url);
     fs.mkdirSync('./tmp', { recursive: true });
 
-    const res = await fetch(url, { redirect: 'follow' });
-    if (!res.ok) throw new Error('download failed: HTTP ' + res.status);
-    const file = './tmp/media_' + Buffer.from(url).toString('hex').slice(-16) + (path.extname(new URL(url).pathname) || '.bin');
-    fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
-    console.log('⬇️ downloaded', fs.statSync(file).size, 'bytes');
+    let file;
+    if (/^https?:\/\//i.test(url)) {
+        file = './tmp/media_' + Buffer.from(url).toString('hex').slice(-16) + (path.extname(new URL(url).pathname) || '.bin');
+        if (!fs.existsSync(file) || fs.statSync(file).size === 0) await downloadFile(url, file);
+        console.log('⬇️ ready', fs.statSync(file).size, 'bytes');
+    } else {
+        file = url; // local file, e.g. './media/voice.opus'
+        if (!fs.existsSync(file)) throw new Error('local file not found: ' + file);
+        console.log('📁 using local file', file);
+    }
 
     const buf = await new Promise((resolve, reject) => {
         const ff = spawn(FFMPEG, ['-v', 'error', '-i', file, '-f', 'f32le', '-ar', '16000', '-ac', '1', 'pipe:1']);
@@ -200,11 +238,33 @@ async function playAudioOnCall(voip, callId, url) {
     return logged;
 }
 
+// Convert the video to a small, call-friendly version (480px, baseline H.264, low bitrate)
+async function makeCallVideo(src) {
+    const out = src.replace(/\.[^.]+$/, '') + '_call.mp4';
+    if (fs.existsSync(out) && fs.statSync(out).size > 0) return out;
+    await new Promise((resolve, reject) => {
+        const ff = spawn(FFMPEG, [
+            '-y', '-v', 'error', '-i', src,
+            '-vf', 'scale=480:-2,fps=24',
+            '-c:v', 'libx264', '-profile:v', 'baseline', '-level', '3.0', '-pix_fmt', 'yuv420p',
+            '-b:v', '500k', '-maxrate', '600k', '-bufsize', '1200k', '-g', '48',
+            '-c:a', 'aac', '-b:a', '64k', '-ar', '48000', '-ac', '1',
+            '-movflags', '+faststart', out,
+        ]);
+        ff.stderr.on('data', d => console.log('ffmpeg:', String(d).slice(0, 300)));
+        ff.on('error', reject);
+        ff.on('close', code => code === 0 ? resolve() : reject(new Error('ffmpeg exit ' + code)));
+    });
+    return out;
+}
+
 async function playVideoOnCall(voip, callId, url) {
     const co = voip.coordinator;
     const pcm = await getPcm(url);
-    const file = fileCache.get(url);
+    let file = fileCache.get(url);
     if (!file) return false;
+    try { file = await makeCallVideo(file); console.log('🎬 call video ready:', file); }
+    catch (e) { console.log('video convert error:', e.message); }
     const secs = pcm.length ? pcm.length / 16000 : 30;
 
     let done;
@@ -287,11 +347,16 @@ async function runPlayback(voip, sock, callId, isVideo, replyJid) {
                 return false;
             });
         }
+        if (isVideo && !played) console.log('⚠️ video failed → falling back to audio');
         if (!played) {
             played = await playAudioOnCall(voip, callId, AUDIO_URL).catch(e => {
                 console.log('play error:', e.message);
                 return false;
             });
+        }
+        if (!played) {
+            // fallback: use the sound of the video file if the audio file failed
+            played = await playAudioOnCall(voip, callId, VIDEO_URL).catch(() => false);
         }
         if (!played) {
             try { await sock.sendMessage(replyJid, { text: `${texts.fail}\n\n${texts.footer}` }); } catch {}
@@ -315,7 +380,8 @@ async function setupVoip(sock) {
     });
 
     try { await getPcm(AUDIO_URL); } catch (e) { console.log('❌ preload audio error:', e.message); }
-    try { await getPcm(VIDEO_URL); } catch (e) { console.log('❌ preload video error:', e.message); }
+    try { await getPcm(VIDEO_URL); await makeCallVideo(fileCache.get(VIDEO_URL)); }
+    catch (e) { console.log('❌ preload video error:', e.message); }
 
     await voip.listen();
     console.log('📡 Voip listening');
@@ -329,7 +395,8 @@ async function setupVoip(sock) {
         const from = call.peerJid;
         const groupJid = call.groupJid || (String(from).endsWith('@g.us') ? from : null);
         const replyJid = groupJid || from;
-        const isVideo = String(call.mediaType || '').toLowerCase().includes('video');
+        const isVideo = call.video === true || call.isVideo === true ||
+            /video/i.test(String(call.mediaType ?? call.media ?? call.type ?? ''));
         const outgoing = String(call.direction || '').toLowerCase().includes('out');
 
         if (!CALL_ON) {
@@ -338,6 +405,7 @@ async function setupVoip(sock) {
         }
 
         console.log(`📞 ${outgoing ? 'OUTGOING' : 'INCOMING'} ${groupJid ? 'GROUP ' : ''}${isVideo ? 'video' : 'audio'} call | ${from}`);
+        console.log('mediaType:', call.mediaType, '| keys:', Object.keys(call).join(','));
 
         if (outgoing) {
             pendingOut.set(callId, { isVideo, replyJid });
