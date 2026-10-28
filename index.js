@@ -9,6 +9,9 @@ import pino from 'pino';
 import fs from 'fs';
 import path from 'path';
 import mongoose from 'mongoose';
+import express from 'express';
+import QRCode from 'qrcode';
+import qrTerminal from 'qrcode-terminal';
 import { spawn } from 'child_process';
 import config from './config.js';
 
@@ -21,13 +24,14 @@ const MONGODB_URI = config.mongodbUri;
 const SESSION_ID = config.sessionId;
 const AUDIO_URL = config.audioUrl;
 const VIDEO_URL = config.videoUrl;
+const USE_PAIR = config.connectMode !== 'qr';
 
 if (!MONGODB_URI) {
     console.log('❌ MONGODB_URI is missing. Set it as an environment variable or in config.js');
     process.exit(1);
 }
-if (!NUMBER || NUMBER.includes('X')) {
-    console.log('❌ Set your number in config.js (number)');
+if (USE_PAIR && (!NUMBER || NUMBER.includes('X'))) {
+    console.log('❌ Set your number in config.js (number) for pairing code login');
     process.exit(1);
 }
 
@@ -434,6 +438,41 @@ async function handleCommand(sock, m) {
     }
 }
 
+// ================= LOGIN + WEB SERVER =================
+let latestQR = null;
+let latestPairCode = null;
+let isConnected = false;
+let pairRequested = false;
+
+function startServer() {
+    const app = express();
+    const page = (body, refresh) => `<!doctype html>${refresh ? `<meta http-equiv="refresh" content="${refresh}">` : ''}
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<body style="display:grid;place-items:center;height:100vh;margin:0;font-family:sans-serif;background:#0d1117;color:#fff">
+<div style="text-align:center"><h2>📞 ${config.botName}</h2>${body}
+<p style="opacity:.6">Free script • by ${config.ownerName}</p></div></body>`;
+
+    app.get('/', (req, res) => res.send(`${config.botName} is running ✅`));
+
+    app.get('/qr', async (req, res) => {
+        if (isConnected) return res.send(page('<h3>✅ Bot is already connected</h3>'));
+
+        if (USE_PAIR) {
+            if (!latestPairCode) return res.send(page('<h3>⏳ Waiting for pairing code...</h3>', 3));
+            return res.send(page(
+                `<h1 style="letter-spacing:6px">${latestPairCode}</h1>
+                 <p>WhatsApp → Linked Devices → Link with phone number instead</p>`, 10));
+        }
+
+        if (!latestQR) return res.send(page('<h3>⏳ Waiting for QR...</h3>', 3));
+        const img = await QRCode.toDataURL(latestQR, { margin: 2, width: 320 });
+        res.send(page(`<img src="${img}" style="border-radius:12px">
+                       <p>WhatsApp → Linked Devices → Link a Device</p>`, 20));
+    });
+
+    app.listen(config.port, () => console.log(`🌐 Server: http://localhost:${config.port}/qr`));
+}
+
 // ================= START =================
 async function start() {
     const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
@@ -451,12 +490,17 @@ async function start() {
         },
     });
 
-    if (!sock.authState.creds.registered) {
+    // Pairing code login
+    if (USE_PAIR && !sock.authState.creds.registered && !pairRequested) {
+        pairRequested = true;
         await sleep(3000);
         try {
             const code = await sock.requestPairingCode(NUMBER);
-            console.log('\n🔑 PAIRING CODE: ' + (code.match(/.{1,4}/g)?.join('-') || code) + '\n');
+            latestPairCode = code?.match(/.{1,4}/g)?.join('-') || code;
+            console.log('\n🔑 PAIRING CODE: ' + latestPairCode);
+            console.log('→ WhatsApp → Linked Devices → Link with phone number instead\n');
         } catch (e) {
+            pairRequested = false;
             console.log('Pairing code error:', e.message);
         }
     }
@@ -477,8 +521,19 @@ async function start() {
     });
 
     let voipReady = false;
-    sock.ev.on('connection.update', async ({ connection, lastDisconnect }) => {
+    sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
+        // QR login
+        if (qr && !USE_PAIR) {
+            latestQR = qr;
+            console.log('📷 Scan this QR (or open /qr in your browser):');
+            qrTerminal.generate(qr, { small: true });
+        }
+
         if (connection === 'open') {
+            isConnected = true;
+            latestQR = null;
+            latestPairCode = null;
+            pairRequested = false;
             console.log('✅ Connected: ' + sock.user?.id);
             await saveSession();
             if (!voipReady) {
@@ -487,10 +542,13 @@ async function start() {
                 catch (e) { console.log('Voip setup error:', e.message); }
             }
         }
+
         if (connection === 'close') {
+            isConnected = false;
             const code = lastDisconnect?.error?.output?.statusCode;
             if (code === DisconnectReason.loggedOut) {
                 console.log('❌ Logged out. Deleting session...');
+                pairRequested = false;
                 await Session.deleteOne({ sessionId: SESSION_ID });
                 fs.rmSync(SESSION_DIR, { recursive: true, force: true });
                 process.exit(1);
@@ -501,9 +559,13 @@ async function start() {
     });
 }
 
-console.log(`🚀 ${config.botName} v${config.version} | Free script by ${config.ownerName}`);
+process.on('uncaughtException', (e) => console.log('Uncaught exception:', e?.message ?? e));
+process.on('unhandledRejection', (e) => console.log('Unhandled rejection:', e?.message ?? e));
+
+console.log(`🚀 ${config.botName} v${config.version} | login: ${USE_PAIR ? 'PAIR' : 'QR'} | Free script by ${config.ownerName}`);
 await mongoose.connect(MONGODB_URI);
 console.log('✅ MongoDB connected');
 await restoreSession();
 await loadSettings();
+startServer();
 start();
