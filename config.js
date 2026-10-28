@@ -1,5 +1,5 @@
 // ============================================================
-//  WA VoIP Bot - config.js
+//  WA VoIP Bot - config.js 
 //  FREE SCRIPT - Made by DNUZI
 //  Edit this file to customize your bot.
 // ============================================================
