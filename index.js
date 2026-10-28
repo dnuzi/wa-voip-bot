@@ -1,3 +1,8 @@
+// ============================================================
+//  WA VoIP Bot - Free Script
+//  Made by DNUZI  |  https://github.com/dnuzi/wa-voip-bot
+// ============================================================
+
 import * as B from '@dnuzi/baileys';
 import Voip from '@dnuzi/baileys/voip';
 import pino from 'pino';
@@ -5,21 +10,28 @@ import fs from 'fs';
 import path from 'path';
 import mongoose from 'mongoose';
 import { spawn } from 'child_process';
+import config from './config.js';
 
 // ================= SETTINGS =================
-const NUMBER = '94757734999'; 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://mohevov436_db_user:JdtPD7e2U03l0SHK@cluster0.mdw067m.mongodb.net/tinwggeg';
-const SESSION_ID = 'main';
+const { prefix, texts } = config;
+const clean = (n) => String(n).replace(/[^0-9]/g, '');
+const NUMBER = clean(config.number);
+const OWNERS = [NUMBER, ...config.owners.map(clean)];
+const MONGODB_URI = config.mongodbUri;
+const SESSION_ID = config.sessionId;
+const AUDIO_URL = config.audioUrl;
+const VIDEO_URL = config.videoUrl;
 
-const AUDIO_URL = 'https://github.com/Lakshanteach/voicee/raw/refs/heads/main/shadow-movie-x-siri-voice.opus';
-const VIDEO_URL = 'https://github.com/Lakshanteach/voicee/raw/refs/heads/main/lv_0_20261015174042.mp4';
+if (!MONGODB_URI) {
+    console.log('❌ MONGODB_URI is missing. Set it as an environment variable or in config.js');
+    process.exit(1);
+}
+if (!NUMBER || NUMBER.includes('X')) {
+    console.log('❌ Set your number in config.js (number)');
+    process.exit(1);
+}
 
-const FAIL_TEXT = '> 👨‍💻 SHADOW MOVIE X SYSTEM ON PLEASE TRY AGIN 💋🇱🇰';
-const OWNER_ONLY_TEXT = '👨‍💻 ꜱʜᴀᴅᴏᴡ ᴍᴏᴠɪᴇ x ᴏᴡɴᴇʀ ᴏɴʏ ᴄᴍᴅ';
-// ============================================
-
-const OWNER_NUM = NUMBER.replace(/[^0-9]/g, '');
-
+// ================= BAILEYS EXPORTS =================
 const pick = (name) => B[name] ?? B.default?.[name] ?? B.default?.default?.[name];
 
 const makeWASocket =
@@ -37,19 +49,54 @@ if (typeof useMultiFileAuthState !== 'function') {
     process.exit(1);
 }
 
-// ffprobe path
 let FFPROBE = 'ffprobe';
 try {
     const m = await import('ffprobe-static');
     FFPROBE = m.default?.path || m.path || 'ffprobe';
 } catch {}
 
-// ffmpeg path
 let FFMPEG = 'ffmpeg';
 try {
     const m = await import('ffmpeg-static');
     FFMPEG = m.default || FFMPEG;
 } catch {}
+
+// ================= MESSAGE STYLES =================
+const statusIcon = () => (CALL_ON ? '🟢 *ON*' : '🔴 *OFF*');
+
+const MENU_TEXT = () =>
+`📞 *${config.botName}*
+_Free script • by ${config.ownerName}_
+
+*Auto Call:* ${statusIcon()}
+
+*Commands*
+▫️ \`${prefix}call on\` — enable auto call
+▫️ \`${prefix}call off\` — disable auto call
+▫️ \`${prefix}call\` — check status
+▫️ \`${prefix}call-menu\` — show this menu
+▫️ \`${prefix}c-ping\` — check speed
+
+*How it works*
+Audio call → voice file
+Video call → video file
+
+👤 *Owner:* ${config.ownerName}
+🔗 ${config.repoUrl}
+
+${texts.freeNote}
+${texts.footer}`;
+
+const STATUS_TEXT = () =>
+`📞 *Auto Call:* ${statusIcon()}
+
+${CALL_ON
+    ? 'Incoming calls, group calls and answered outgoing calls will play your media automatically.'
+    : 'The bot will ignore all calls until you turn it on.'}
+
+Use \`${prefix}call-menu\` for all commands.
+
+${texts.footer}`;
 
 // ================= SETTINGS (ON/OFF) =================
 const Setting = mongoose.model('Setting', new mongoose.Schema({
@@ -57,43 +104,18 @@ const Setting = mongoose.model('Setting', new mongoose.Schema({
     value: mongoose.Schema.Types.Mixed,
 }));
 
-let CALL_ON = true; // default ON
+let CALL_ON = config.autoCallDefault;
 
 async function loadSettings() {
-    const s = await Setting.findOne({ key: 'shadowCall' });
+    const s = await Setting.findOne({ key: 'autoCall' });
     if (s) CALL_ON = !!s.value;
-    console.log('📞 Shadow-call:', CALL_ON ? 'ON' : 'OFF');
+    console.log('📞 Auto call:', CALL_ON ? 'ON' : 'OFF');
 }
 
 async function setCallOn(v) {
     CALL_ON = v;
-    await Setting.findOneAndUpdate({ key: 'shadowCall' }, { value: v }, { upsert: true });
+    await Setting.findOneAndUpdate({ key: 'autoCall' }, { value: v }, { upsert: true });
 }
-
-const statusText = () => (CALL_ON ? '✅ ON' : '❌ OFF');
-
-const MENU_TEXT = () => `╭━━━〔 👨‍💻 *SHADOW CALL MENU* 〕━━━╮
-
-📞 *ꜱʜᴀᴅᴏᴡ ᴀᴜᴛᴏ ᴄᴀʟʟ ❯❯* ${statusText()}
-
-┃ ▸ *.shadow-call on*
-┃    ᴀᴜᴛᴏ ᴄᴀʟʟ ꜱʏꜱᴛᴇᴍ ᴏɴ 👨‍💻
-┃    (audio call → voice, video call → video) 👨‍💻
-┃
-┃ ▸ *.shadow-call off*
-┃    ꜱʜᴀᴅᴏᴡ ᴄᴀʟʟ ꜱʏꜱᴛᴇᴍ ᴏꜰꜰ 👨‍💻
-┃
-┃ ▸ *.shadow-call*
-┃    ꜱʜᴀᴅᴏᴡ ᴄᴀʟʟ ꜱʏꜱᴛᴇᴍ ᴏɴ ᴏʀ ᴏꜰꜰ ᴄʜᴇᴄᴋ 👨‍💻
-┃
-┃ ▸ *.shadow-call-menu*
-┃    ꜱʜᴀᴅᴏᴡ ᴄᴀʟʟ ᴍᴇɴᴜ 👨‍💻
-┃
-┃ ▸ *.c-ping*
-┃    ꜱʜᴀᴅᴏᴡ ᴄᴀʟʟ ꜱʏꜱᴛᴇᴍ ᴘɪɴɢ ᴄʜᴇᴄᴋ 👨‍💻
-╰━━☠️̶͟͞⃞ 🅃̥ᴇᴄͭ͟͠ʜͤɴͣ͢͞ɪᴄͫᴀ͡ʟ•°Ｃ⃝͠y֯ʙֱ֘ᴇ⃖⃖ʀ־ֱꜱ̀˗ᴵ̛ᴺʾᶜ 🇱🇰⃞̶͞⚔̶͟͞━━━╯
-
-> ⏤͟͟͞͞🫯ᴛᴇᴄʜＳʜᴀᴅᴏᴡ Ｍᴏᴠɪᴇ {ｘ} ᴵᴺᶜ ✓`;
 
 // ================= MEDIA =================
 const pcmCache = new Map();
@@ -247,8 +269,8 @@ const debouncedSave = () => {
 };
 
 // ================= VOIP =================
-const handled = new Set();      // play කරපු/කරන calls (duplicate නවත්තන්න)
-const pendingOut = new Map();   // මම කරපු calls (එයා answer කරනකම් බලාගෙන)
+const handled = new Set();      // calls already played / playing (prevents duplicates)
+const pendingOut = new Map();   // outgoing calls waiting for the other side to answer
 
 async function runPlayback(voip, sock, callId, isVideo, replyJid) {
     if (handled.has(callId)) return;
@@ -268,7 +290,7 @@ async function runPlayback(voip, sock, callId, isVideo, replyJid) {
             });
         }
         if (!played) {
-            try { await sock.sendMessage(replyJid, { text: FAIL_TEXT }); } catch {}
+            try { await sock.sendMessage(replyJid, { text: `${texts.fail}\n\n${texts.footer}` }); } catch {}
         }
         await sleep(1500);
         await voip.hangup(callId).catch(() => {});
@@ -283,9 +305,9 @@ async function setupVoip(sock) {
     fs.mkdirSync('./tmp', { recursive: true });
     const voip = new Voip(sock, {
         ffprobePath: FFPROBE,
-        voipLogLevel: 'warn',
+        voipLogLevel: config.voip.logLevel,
         tmpDir: './tmp',
-        maxConcurrentCalls: 3,
+        maxConcurrentCalls: config.voip.maxConcurrentCalls,
     });
 
     try { await getPcm(AUDIO_URL); } catch (e) { console.log('❌ preload audio error:', e.message); }
@@ -294,10 +316,10 @@ async function setupVoip(sock) {
     await voip.listen();
     console.log('📡 Voip listening');
 
-    // ---------- call_incoming ----------
-    // 1) සාමාන්‍ය audio/video call එකක් ආවොත්
-    // 2) group call එකකට / වෙන කෙනෙක්ගේ call එකකට bot ව add කලොත්
-    // 3) මම call කලොත් (outgoing) -> එයා answer කරනකම් බලාගෙන ඉන්නවා
+    // call_incoming covers:
+    // 1) a normal audio/video call
+    // 2) the bot being added to a group call
+    // 3) your own outgoing call (waits until the other side answers)
     voip.on('call_incoming', async (call) => {
         const callId = call.callId;
         const from = call.peerJid;
@@ -306,14 +328,12 @@ async function setupVoip(sock) {
         const isVideo = String(call.mediaType || '').toLowerCase().includes('video');
         const outgoing = String(call.direction || '').toLowerCase().includes('out');
 
-        
         if (!CALL_ON) {
-            console.log('⏸️ shadow-call OFF → ignore:', from);
+            console.log('⏸️ auto call OFF → ignore:', from);
             return;
         }
 
         console.log(`📞 ${outgoing ? 'OUTGOING' : 'INCOMING'} ${groupJid ? 'GROUP ' : ''}${isVideo ? 'video' : 'audio'} call | ${from}`);
-        console.log('mediaType:', call.mediaType, '| group:', call.groupJid, '| direction:', call.direction);
 
         if (outgoing) {
             pendingOut.set(callId, { isVideo, replyJid });
@@ -327,11 +347,10 @@ async function setupVoip(sock) {
         } catch (e) {
             console.log('❌ Accept error:', e.message);
             try { await voip.rejectCall(callId); } catch {}
-            try { await sock.sendMessage(replyJid, { text: FAIL_TEXT }); } catch {}
+            try { await sock.sendMessage(replyJid, { text: `${texts.fail}\n\n${texts.footer}` }); } catch {}
         }
     });
 
-    
     const onAnswered = (c, raw) => {
         const id = c?.callId ?? c?.call?.callId;
         const info = pendingOut.get(id);
@@ -343,7 +362,6 @@ async function setupVoip(sock) {
 
     voip.on('call_state', (c) => {
         const s = JSON.stringify(c?.state ?? c?.stateData ?? c) || '';
-        console.log('📶 state:', s.slice(0, 200));
         if (ANSWERED_RE.test(s)) onAnswered(c, s);
     });
     voip.on('call_answered', (c) => onAnswered(c, 'call_answered'));
@@ -357,7 +375,6 @@ async function setupVoip(sock) {
         waiters.get(c?.callId)?.();
     });
     voip.on('call_outbound_audio_finished', (c) => {
-        console.log('🎵 outbound audio finished event', c?.callId ?? '');
         waiters.get(c?.callId ?? c?.call?.callId)?.();
     });
     voip.on('call_error', (e) => console.log('Call error:', e?.message ?? e));
@@ -365,24 +382,27 @@ async function setupVoip(sock) {
     return voip;
 }
 
-
+// ================= COMMANDS =================
 async function handleCommand(sock, m) {
     const body =
         m.message.conversation ||
         m.message.extendedTextMessage?.text ||
         m.message.imageMessage?.caption || '';
-    const cmd = body.trim().toLowerCase();
+    const text = body.trim().toLowerCase();
+    if (!text.startsWith(prefix)) return;
+
+    const [name, arg, extra] = text.slice(prefix.length).split(/\s+/);
     const jid = m.key.remoteJid;
 
-    const callMatch = cmd.match(/^\.shadow-call(?:\s+(on|off))?$/);
-    const isMenu = cmd === '.shadow-call-menu';
-    const isPing = cmd === '.c-ping';
-    if (!callMatch && !isMenu && !isPing) return;
+    const isCall = name === 'call' && !extra && (arg === undefined || arg === 'on' || arg === 'off');
+    const isMenu = name === 'call-menu' && arg === undefined;
+    const isPing = name === 'c-ping' && arg === undefined;
+    if (!isCall && !isMenu && !isPing) return;
 
     const sender = (m.key.participant || jid).split('@')[0].split(':')[0];
-    const isOwner = m.key.fromMe || sender === OWNER_NUM;
+    const isOwner = m.key.fromMe || OWNERS.includes(sender);
     if (!isOwner) {
-        await sock.sendMessage(jid, { text: OWNER_ONLY_TEXT }, { quoted: m });
+        await sock.sendMessage(jid, { text: `${texts.ownerOnly}\n\n${texts.footer}` }, { quoted: m });
         return;
     }
 
@@ -391,27 +411,26 @@ async function handleCommand(sock, m) {
         return;
     }
 
-    if (callMatch) {
-        const arg = callMatch[1];
+    if (isCall) {
         if (arg === 'on') await setCallOn(true);
         if (arg === 'off') {
             await setCallOn(false);
             pendingOut.clear();
         }
-        await sock.sendMessage(jid, {
-            text: `📞 *SHADOW CALL:* ${statusText()}\n\n` +
-                  (CALL_ON
-                      ? '▸ call එකක් ආවොත් / group call එකකට add කලොත් / මම call කරලා එයා answer කලොත් bot auto play කරනවා'
-                      : '▸ shadow-call සම්පූර්ණයෙන් OFF - bot මුකුත් කරන්නේ නෑ') +
-                  `\n\n.shadow-call-menu\n\n${OWNER_ONLY_TEXT}`
-        }, { quoted: m });
+        await sock.sendMessage(jid, { text: STATUS_TEXT() }, { quoted: m });
         return;
     }
 
     if (isPing) {
         const t = Date.now();
-        await sock.sendMessage(jid, { text: '😒 Pong!' }, { quoted: m });
-        await sock.sendMessage(jid, { text: `⚡ ${Date.now() - t} ms` });
+        const sent = await sock.sendMessage(jid, { text: '🏓 Pinging...' }, { quoted: m });
+        const ms = Date.now() - t;
+        const result = `🏓 *Pong!*\n⚡ Speed: *${ms} ms*\n\n${texts.footer}`;
+        try {
+            await sock.sendMessage(jid, { text: result, edit: sent.key });
+        } catch {
+            await sock.sendMessage(jid, { text: result });
+        }
     }
 }
 
@@ -433,15 +452,10 @@ async function start() {
     });
 
     if (!sock.authState.creds.registered) {
-        const number = NUMBER.replace(/[^0-9]/g, '');
-        if (!number || number.includes('X')) {
-            console.log('❌ NUMBER එක දාන්න ponz!');
-            process.exit(1);
-        }
-        await new Promise(r => setTimeout(r, 3000));
+        await sleep(3000);
         try {
-            const code = await sock.requestPairingCode(number);
-            console.log('\n🫩 PAIRING CODE: ' + (code.match(/.{1,4}/g)?.join('-') || code) + '\n');
+            const code = await sock.requestPairingCode(NUMBER);
+            console.log('\n🔑 PAIRING CODE: ' + (code.match(/.{1,4}/g)?.join('-') || code) + '\n');
         } catch (e) {
             console.log('Pairing code error:', e.message);
         }
@@ -476,7 +490,7 @@ async function start() {
         if (connection === 'close') {
             const code = lastDisconnect?.error?.output?.statusCode;
             if (code === DisconnectReason.loggedOut) {
-                console.log('❌ Logged out. Session delete කරනවා...');
+                console.log('❌ Logged out. Deleting session...');
                 await Session.deleteOne({ sessionId: SESSION_ID });
                 fs.rmSync(SESSION_DIR, { recursive: true, force: true });
                 process.exit(1);
@@ -487,6 +501,7 @@ async function start() {
     });
 }
 
+console.log(`🚀 ${config.botName} v${config.version} | Free script by ${config.ownerName}`);
 await mongoose.connect(MONGODB_URI);
 console.log('✅ MongoDB connected');
 await restoreSession();
