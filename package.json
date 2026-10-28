@@ -1,0 +1,16 @@
+{
+  "name": "call-bot",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "scripts": { "start": "node index.js" },
+  "dependencies": {
+    "@dnuzi/baileys": "0.1.1",
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0",
+    "jimp": "^1.6.1",
+    "mongoose": "^8.0.0",
+    "pino": "^8.16.1",
+    "sharp": "^0.34.5"
+  }
+}
