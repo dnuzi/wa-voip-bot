@@ -1,16 +1,44 @@
 {
-  "name": "call-bot",
-  "version": "1.0.0",
+  "name": "wa-voip-bot",
+  "version": "0.0.1",
+  "description": "WhatsApp auto call bot - answers audio/video calls and plays your own voice or video automatically. QR + Pairing code login.",
   "type": "module",
   "main": "index.js",
-  "scripts": { "start": "node index.js" },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "whatsapp",
+    "whatsapp-bot",
+    "voip",
+    "baileys",
+    "auto-call",
+    "call-bot",
+    "nodejs"
+  ],
+  "author": "dnuzi",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dnuzi/wa-voip-bot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dnuzi/wa-voip-bot/issues"
+  },
+  "homepage": "https://github.com/dnuzi/wa-voip-bot#readme",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "@dnuzi/baileys": "0.1.1",
+    "express": "^4.19.2",
     "ffmpeg-static": "^5.2.0",
     "ffprobe-static": "^3.1.0",
     "jimp": "^1.6.1",
     "mongoose": "^8.0.0",
     "pino": "^8.16.1",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0",
     "sharp": "^0.34.5"
   }
 }
